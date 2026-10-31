@@ -1,0 +1,71 @@
+name: sentinela
+
+on:
+  schedule:
+    - cron: '2-59/5 * * * *'
+    - cron: '17 12 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conferir:
+    if: github.event.schedule != '17 12 1 * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - alvo: producao
+            url: https://app.tmscortex.com.br/health
+            rotulo: ''
+          - alvo: teste
+            url: https://raw.githubusercontent.com/tms-cortex/sentinela/main/teste/health.json
+            rotulo: 'TESTE · '
+    concurrency:
+      group: sentinela-${{ matrix.alvo }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - id: vez
+        run: |
+          if [ "${{ matrix.alvo }}" = "producao" ] || [ -f teste/ATIVO ]; then
+            echo "rodar=sim" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.vez.outputs.rodar == 'sim'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .estado
+          key: estado-${{ matrix.alvo }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: estado-${{ matrix.alvo }}-
+      - if: steps.vez.outputs.rodar == 'sim'
+        run: python3 sentinela.py
+        env:
+          SENTINELA_URL: ${{ matrix.alvo == 'teste' && format('{0}?rodada={1}', matrix.url, github.run_id) || matrix.url }}
+          SENTINELA_ROTULO: ${{ matrix.rotulo }}
+          SENTINELA_ESTADO: .estado/${{ matrix.alvo }}.json
+          NTFY_TOPICO: ${{ secrets.NTFY_TOPICO }}
+      - if: always() && steps.vez.outputs.rodar == 'sim'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .estado
+          key: estado-${{ matrix.alvo }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  # O GitHub desliga agendamento de repositorio publico depois de 60 dias sem movimento.
+  batida-mensal:
+    if: github.event.schedule == '17 12 1 * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: |
+          git config user.name "sentinela"
+          git config user.email "sentinela@users.noreply.github.com"
+          git commit --allow-empty -m "batida mensal"
+          git push
