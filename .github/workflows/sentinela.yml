@@ -3,7 +3,7 @@ name: sentinela
 
 on:
   schedule:
-    - cron: '2-59/5 * * * *'
+    - cron: '*/5 * * * *'
     - cron: '17 12 1 * *'
   workflow_dispatch:
 
